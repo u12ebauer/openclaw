@@ -4,12 +4,8 @@ import { PanelLoadingSkeleton } from "../../components/solid/panel-loading-skele
 import type { BoardViewCallbacks } from "../../lib/board/provider.ts";
 import type { BoardSnapshot } from "../../lib/board/types.ts";
 import type { BoardWidgetFrameUrl } from "../../lib/board/view-types.ts";
+import { PRESENTATION_CHANGED_EVENT, type PresentationValue } from "../../lib/presentation.ts";
 import { t } from "../../lib/reactive/i18n.ts";
-import {
-  PRESENTATION_CHANGED_EVENT,
-  type PresentationValue,
-} from "../../lit/presentation-binding.ts";
-import { solidContent } from "../../lit/solid-content.tsx";
 
 export type BoardSessionSurfaceProps = {
   active: PresentationValue;
@@ -76,12 +72,4 @@ export function BoardSessionSurface(props: BoardSessionSurfaceProps & { elementR
       </div>
     </div>
   );
-}
-
-/** Retained Lit panes keep one Solid owner while their board props change. */
-export function renderBoardSessionSurface(props: BoardSessionSurfaceProps) {
-  return solidContent(BoardSessionSurface, {
-    ...props,
-    elementReady: Boolean(customElements.get("openclaw-board-view")),
-  });
 }
