@@ -1,0 +1,55 @@
+import {
+  filterChannelInboundQuoteContext,
+  resolveInboundSupplementalSenderAllowed,
+} from "openclaw/plugin-sdk/channel-inbound";
+import { resolveChannelContextVisibilityMode } from "openclaw/plugin-sdk/context-visibility-runtime";
+import {
+  formatSignalSenderDisplay,
+  isSignalSenderAllowed,
+  resolveSignalSender,
+} from "../identity.js";
+import type { SignalDataMessage } from "./event-handler.types.js";
+import { renderSignalMentions } from "./mentions.js";
+
+export function resolveSignalQuoteContext(params: {
+  cfg: Parameters<typeof resolveChannelContextVisibilityMode>[0]["cfg"];
+  accountId: string;
+  isGroup: boolean;
+  dataMessage?: SignalDataMessage | null;
+  effectiveGroupAllow: string[];
+}) {
+  const contextVisibilityMode = resolveChannelContextVisibilityMode({
+    cfg: params.cfg,
+    channel: "signal",
+    accountId: params.accountId,
+  });
+  const quoteText = renderSignalMentions(
+    params.dataMessage?.quote?.text ?? "",
+    params.dataMessage?.quote?.mentions,
+  ).trim();
+  const quoteSender = resolveSignalSender({
+    sourceNumber: params.dataMessage?.quote?.author ?? null,
+    sourceUuid: params.dataMessage?.quote?.authorUuid ?? null,
+  });
+  const quoteSenderAllowed = resolveInboundSupplementalSenderAllowed({
+    isGroup: params.isGroup,
+    groupPolicy: params.effectiveGroupAllow.length === 0 ? "open" : "allowlist",
+    allowFrom: params.effectiveGroupAllow,
+    isSenderAllowed: (allowFrom) =>
+      quoteSender ? isSignalSenderAllowed(quoteSender, allowFrom) : false,
+  });
+  const visibleQuote = filterChannelInboundQuoteContext(contextVisibilityMode, {
+    body: quoteText,
+    sender: quoteSender ? formatSignalSenderDisplay(quoteSender) : undefined,
+    senderAllowed: quoteSenderAllowed,
+    isQuote: true,
+  });
+
+  return {
+    quoteText,
+    contextVisibilityMode,
+    quoteSenderAllowed,
+    visibleQuoteText: visibleQuote?.body ?? "",
+    visibleQuoteSender: visibleQuote?.sender,
+  };
+}
