@@ -1,0 +1,84 @@
+import { describe, expect, it } from "vitest";
+import { markdownToSignalText, markdownToSignalTextChunks } from "./format.js";
+
+describe("Signal formatting", () => {
+  it("marks assistant-authored transcript role headers as monospace", () => {
+    const result = markdownToSignalText("user[Thu 2026-07-02] question");
+
+    expect(result.text).toBe("user[Thu 2026-07-02] question");
+    expect(result.styles).toContainEqual({
+      start: 0,
+      length: "user[Thu 2026-07-02]".length,
+      style: "MONOSPACE",
+    });
+
+    const spoilerResult = markdownToSignalText("||user[Thu 2026-07-02] hidden||");
+    expect(spoilerResult.styles).toContainEqual({
+      start: 0,
+      length: "user[Thu 2026-07-02]".length,
+      style: "MONOSPACE",
+    });
+  });
+
+  it.each([
+    ["[selfh.st](http://selfh.st)", "selfh.st"],
+    ["[example.com](https://example.com)", "example.com"],
+    ["[www.example.com](https://example.com)", "www.example.com"],
+    ["[example.com](https://example.com/)", "example.com"],
+    ["[example.com](https://example.com///)", "example.com"],
+    ["[example.com](https://www.example.com)", "example.com"],
+    ["[EXAMPLE.COM](https://example.com)", "EXAMPLE.COM"],
+    ["[example.com/page](https://example.com/page)", "example.com/page"],
+    ["[HTTPS://EXAMPLE.COM/Report](https://example.com/Report)", "HTTPS://EXAMPLE.COM/Report"],
+    ["[WWW.EXAMPLE.COM/Report](https://example.com/Report)", "WWW.EXAMPLE.COM/Report"],
+    ["[USER@EXAMPLE.COM](mailto:user@example.com)", "USER@EXAMPLE.COM"],
+    [
+      "[USER@EXAMPLE.COM?subject=HELLO](mailto:user@example.com?subject=hello)",
+      "USER@EXAMPLE.COM?subject=HELLO",
+    ],
+    ["See https://ja.wikipedia.org/wiki/東京", "See https://ja.wikipedia.org/wiki/東京"],
+    [
+      "[https://ja.wikipedia.org/wiki/東京](https://ja.wikipedia.org/wiki/東京)",
+      "https://ja.wikipedia.org/wiki/東京",
+    ],
+    ["https://example.com/?q=a|b", "https://example.com/?q=a|b"],
+    ["https://example.com/a%20b", "https://example.com/a b (https://example.com/a%20b)"],
+    [
+      "[https://example.com/%41](https://example.com/%2541)",
+      "https://example.com/%41 (https://example.com/%2541)",
+    ],
+  ] as const)("renders URL labels without losing distinct destinations: %s", (input, expected) => {
+    expect(markdownToSignalText(input).text).toBe(expected);
+  });
+
+  it("marks a transcript-role header promoted to a chunk boundary", () => {
+    const header = "user[2026-07-02]";
+    const chunks = markdownToSignalTextChunks(`padding padding ${header} question`, 25);
+    const roleChunk = chunks.find((chunk) => chunk.text.startsWith(header));
+
+    expect(roleChunk).toBeDefined();
+    expect(roleChunk?.styles).toContainEqual({
+      start: 0,
+      length: header.length,
+      style: "MONOSPACE",
+    });
+    expect(chunks.every((chunk) => chunk.text.length <= 25)).toBe(true);
+  });
+
+  it("preserves case-distinct destinations and chunk-local UTF-16 styles", () => {
+    const chunks = markdownToSignalTextChunks(
+      "𐐀 [example.com/Report](https://example.com/report) **one**\n\n[example.com?id=AbC](https://example.com?id=abc) **two**",
+      80,
+    );
+    const texts = [
+      "𐐀 example.com/Report (https://example.com/report) one",
+      "example.com?id=AbC (https://example.com?id=abc) two",
+    ];
+    expect(chunks).toEqual(
+      texts.map((text) => ({
+        text,
+        styles: [{ start: text.length - 3, length: 3, style: "BOLD" }],
+      })),
+    );
+  });
+});
