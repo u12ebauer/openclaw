@@ -86,9 +86,9 @@ describe("persisted subagent requester wakes", () => {
     const input = expectDefined(batch[2], "required child");
     optional.subagent.expectsCompletionMessage = false;
     optional.subagent.delivery = { status: "not_required" };
-    optional.subagent.requesterSettleWake!.retireAfterSettle = true;
+    optional.subagent.retireAfterSettle = true;
     delivered.subagent.delivery = { status: "delivered" };
-    input.subagent.requesterSettleWake!.retireAfterSettle = true;
+    input.subagent.retireAfterSettle = true;
     input.subagent.cleanup = "delete";
     input.subagent.execution.outcome = { status: "error", error: "Gateway stopped" };
     for (const member of batch) {
@@ -114,8 +114,6 @@ describe("persisted subagent requester wakes", () => {
     const outcome = {
       delivered: false,
       path: "direct",
-      reason: "requester_aborted",
-      disposition: "permanent_failure",
     } as const;
     const settle = () =>
       settleRequesterCompletionBatch({
@@ -146,7 +144,7 @@ describe("persisted subagent requester wakes", () => {
     const input = armRequesterWake(records());
     input.subagent.expectsCompletionMessage = false;
     input.subagent.delivery = { status: "not_required" };
-    input.subagent.requesterSettleWake!.retireAfterSettle = true;
+    input.subagent.retireAfterSettle = true;
     persistOwner(input);
     let committed: RequesterWakeCommittedWrite | undefined;
     await expect(
@@ -366,7 +364,7 @@ describe("persisted subagent requester wakes", () => {
       const inputs = wakeBatch("run", "second");
       for (const input of inputs) {
         if (cut === "retirement") {
-          input.subagent.requesterSettleWake!.retireAfterSettle = true;
+          input.subagent.retireAfterSettle = true;
         }
         persistOwner(input);
       }
@@ -438,7 +436,7 @@ describe("persisted subagent requester wakes", () => {
     "records the settled completion outcome before retention or retirement (retire=%s)",
     async (retire) => {
       const input = armRequesterWake(records());
-      input.subagent.requesterSettleWake!.retireAfterSettle = retire;
+      input.subagent.retireAfterSettle = retire ? true : undefined;
       const receipt = input.subagent.delivery!;
       receipt.payload = loadPendingFinalDeliveryPayload(input.subagent);
       receipt.attemptCount = 2;
@@ -495,7 +493,7 @@ describe("persisted subagent requester wakes", () => {
       const [first, second, third] = [inputs[0]!, inputs[1]!, inputs[2]!];
       for (const input of inputs) {
         if (input === second && change === "blocked retirement") {
-          input.subagent.requesterSettleWake!.retireAfterSettle = true;
+          input.subagent.retireAfterSettle = true;
         }
         input.subagent.requesterSettleWake!.status = "dispatching";
         input.subagent.requesterSettleWake!.attemptCount = 1;
@@ -658,7 +656,7 @@ describe("persisted subagent requester wakes", () => {
           cleanupCompletedAt: undefined,
         });
         input.subagent.execution.outcome = undefined;
-        input.subagent.requesterSettleWake!.retireAfterSettle = true;
+        input.subagent.retireAfterSettle = true;
       }
       persistOwner(input);
       const before = structuredClone(input.subagent);
@@ -687,53 +685,42 @@ describe("persisted subagent requester wakes", () => {
     },
   );
 
-  it.each(["delivered", "operator authority lost"] as const)(
-    "settles a pause notice across reopen (%s)",
-    async (settlement) => {
-      const paused = records();
-      const sibling = records();
-      sibling.subagent.runId = "running-sibling";
-      sibling.subagent.childSessionKey = "agent:main:subagent:sibling";
-      sibling.subagent.execution = { status: "running", startedAt: Date.now() };
-      const batchRunIds = [paused.subagent.runId, sibling.subagent.runId];
-      for (const input of [paused, sibling]) {
-        armRequesterWake(input, batchRunIds);
-      }
-      paused.subagent.pauseReason = "sessions_yield";
-      paused.subagent.execution.outcome = undefined;
-      paused.subagent.completion = { required: true };
-      paused.subagent.delivery = { status: "pending" };
-      paused.subagent.cleanupHandled = false;
-      paused.subagent.cleanupCompletedAt = undefined;
-      const completionWake = structuredClone(paused.subagent.requesterSettleWake);
-      paused.subagent.requesterSettleWake!.pauseNotice = { acknowledgment: "Need a continuation." };
-      for (const input of [paused, sibling]) {
-        persistOwner(input);
-      }
-      const siblingBefore = structuredClone(sibling.subagent);
+  it("settles a delivered pause notice across reopen", async () => {
+    const paused = records();
+    const sibling = records();
+    sibling.subagent.runId = "running-sibling";
+    sibling.subagent.childSessionKey = "agent:main:subagent:sibling";
+    sibling.subagent.execution = { status: "running", startedAt: Date.now() };
+    const batchRunIds = [paused.subagent.runId, sibling.subagent.runId];
+    for (const input of [paused, sibling]) {
+      armRequesterWake(input, batchRunIds);
+    }
+    paused.subagent.pauseReason = "sessions_yield";
+    paused.subagent.execution.outcome = undefined;
+    paused.subagent.completion = { required: true };
+    paused.subagent.delivery = { status: "pending" };
+    paused.subagent.cleanupHandled = false;
+    paused.subagent.cleanupCompletedAt = undefined;
+    const completionWake = structuredClone(paused.subagent.requesterSettleWake);
+    paused.subagent.requesterSettleWake!.pauseNotice = { acknowledgment: "Need a continuation." };
+    for (const input of [paused, sibling]) {
+      persistOwner(input);
+    }
+    const siblingBefore = structuredClone(sibling.subagent);
 
-      await settleOne(paused, {
-        delivered: settlement === "delivered",
-        path: "direct",
-        ...(settlement === "operator authority lost"
-          ? {
-              disposition: "permanent_failure" as const,
-              reason: "operator_authority_unavailable" as const,
-            }
-          : {}),
-      });
-      db.value = await reopenOwners();
-      const restored = subagentRuns.get(paused.subagent.runId)!;
-      expect(restored.requesterSettleWake).toEqual(
-        settlement === "delivered" ? completionWake : undefined,
-      );
-      expect(restored.pauseReason).toBe("sessions_yield");
-      expect(restored.execution.outcome).toBeUndefined();
-      expect(restored.delivery).toEqual({ status: "pending" });
-      expect(subagentRuns.get(sibling.subagent.runId)).toEqual(siblingBefore);
-      expect(systemEvents(db.value)).toEqual([]);
-    },
-  );
+    await settleOne(paused, {
+      delivered: true,
+      path: "direct",
+    });
+    db.value = await reopenOwners();
+    const restored = subagentRuns.get(paused.subagent.runId)!;
+    expect(restored.requesterSettleWake).toEqual(completionWake);
+    expect(restored.pauseReason).toBe("sessions_yield");
+    expect(restored.execution.outcome).toBeUndefined();
+    expect(restored.delivery).toEqual({ status: "pending" });
+    expect(subagentRuns.get(sibling.subagent.runId)).toEqual(siblingBefore);
+    expect(systemEvents(db.value)).toEqual([]);
+  });
 
   it.each(["unchanged", "run generation"])(
     "reconciles a retired cancellation wake only with its current owner: %s",
@@ -786,7 +773,6 @@ describe("persisted subagent requester wakes", () => {
     input.subagent.suppressCompletionDelivery = true;
     input.subagent.delivery = {
       status: "not_required",
-      disposition: "intentional_non_delivery",
       generation: 1,
     };
     input.subagent.requesterSettleWake!.requesterYieldBatch = true;

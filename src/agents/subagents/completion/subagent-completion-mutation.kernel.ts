@@ -137,7 +137,7 @@ function prepareHistorySettledCompletion(
     !subagent ||
     subagent.execution.status !== "terminal" ||
     subagent.pauseReason === "sessions_yield" ||
-    subagent.expectsCompletionMessage !== true ||
+    subagent.expectsCompletionMessage === false ||
     subagent.delivery?.status === "delivered" ||
     (subagent.delivery?.generation ?? 1) !== (expected.delivery?.generation ?? 1)
   ) {
@@ -244,14 +244,8 @@ function mutateRequesterBatch(
       return { subagent };
     }
     const now = params.now;
+    // A notice is one paused member's input, not settlement of its frozen cohort.
     if (consumeSubagentPauseNotice(subagent)) {
-      // A notice is one paused member's input, not settlement of its frozen cohort.
-      if (
-        params.outcome.disposition === "intentional_non_delivery" ||
-        params.outcome.reason === "operator_authority_unavailable"
-      ) {
-        subagent.requesterSettleWake = undefined;
-      }
       return { subagent };
     }
     // A batch that missed its turn already has its status in requester history.
@@ -327,7 +321,7 @@ function reconcileRequesterWake(
       !isDeepStrictEqual(current.killIntent, intended.killIntent) ||
       !isDeepStrictEqual(current.killReconciliation, intended.killReconciliation) ||
       !isDeepStrictEqual(current.requesterSettleWake, intended.requesterSettleWake) ||
-      current.retireAfterRequesterTurn !== intended.retireAfterRequesterTurn ||
+      current.retireAfterSettle !== intended.retireAfterSettle ||
       (params.kind === "requesterBatch" &&
         (!isDeepStrictEqual(current.delivery, intended.delivery) ||
           current.suppressCompletionDelivery !== intended.suppressCompletionDelivery ||
